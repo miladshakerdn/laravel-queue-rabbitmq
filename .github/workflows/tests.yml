@@ -9,9 +9,10 @@ on:
 jobs:
   tests:
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
 
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         php: ['8.2', '8.3']
         stability: ['prefer-lowest', 'prefer-stable']
@@ -31,48 +32,80 @@ jobs:
           php-version: ${{ matrix.php }}
           extensions: dom, curl, libxml, mbstring, zip, json
           coverage: none
+          tools: composer:v2.8.6
+
+      - name: Get Composer Cache Directory
+        id: composer-cache
+        run: |
+          echo "dir=$(composer config cache-files-dir)" >> $GITHUB_OUTPUT
+
+      - name: Cache Composer dependencies
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: ${{ runner.os }}-composer-${{ matrix.php }}-${{ matrix.stability }}-${{ hashFiles('**/composer.json') }}
+          restore-keys: |
+            ${{ runner.os }}-composer-${{ matrix.php }}-${{ matrix.stability }}-
+            ${{ runner.os }}-composer-${{ matrix.php }}-
+            ${{ runner.os }}-composer-
 
       - name: Set up Docker
+        timeout-minutes: 5
         run: |
           docker-compose up -d rabbitmq
 
       - name: Install dependencies
+        timeout-minutes: 5
         run: |
           composer update --with='laravel/framework:${{matrix.laravel}}' --${{ matrix.stability }} --prefer-dist --no-interaction --no-progress
 
       - name: Run Laravel Pint
+        timeout-minutes: 2
         run: ./vendor/bin/pint --test
 
       - name: Wait for RabbitMQ
+        timeout-minutes: 2
         run: |
-          timeout=30
-          until docker exec $(docker ps -qf "name=rabbitmq") rabbitmqctl status >/dev/null 2>&1 || [ $timeout -eq 0 ]; do
-            echo "Waiting for RabbitMQ to be ready... ($timeout seconds left)"
+          echo "Waiting for RabbitMQ to be ready..."
+          for i in {1..30}; do
+            if docker exec $(docker ps -qf "name=rabbitmq") rabbitmqctl status >/dev/null 2>&1; then
+              echo "RabbitMQ is ready!"
+              exit 0
+            fi
+            echo "Attempt $i/30 - Waiting for RabbitMQ..."
             sleep 1
-            ((timeout--))
           done
-          if [ $timeout -eq 0 ]; then
-            echo "Timeout waiting for RabbitMQ"
-            exit 1
-          fi
-          echo "RabbitMQ is ready!"
+          echo "RabbitMQ failed to start"
+          docker ps
+          docker logs $(docker ps -qf "name=rabbitmq")
+          exit 1
 
       - name: Execute tests
-        run: vendor/bin/phpunit
+        timeout-minutes: 5
+        run: vendor/bin/phpunit --verbose
         env:
           HOST: localhost
           PORT: 5672
           RABBITMQ_USER: guest
           RABBITMQ_PASSWORD: guest
           RABBITMQ_VHOST: /
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Store test logs
         if: failure()
         uses: actions/upload-artifact@v4
+        timeout-minutes: 1
         with:
-          name: test-logs-php${{ matrix.php }}-laravel${{ matrix.laravel }}-${{ github.sha }}
+          name: test-logs-${{ matrix.php }}-${{ matrix.stability }}-${{ github.sha }}
           path: |
             ./storage/logs
             ./phpunit.xml
             ./.env.testing
+            ./docker-compose.logs
           retention-days: 5
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker-compose down -v
+          docker system prune -f
