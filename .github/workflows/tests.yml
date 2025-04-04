@@ -13,41 +13,62 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        php: ['8.1', '8.2', '8.3']
+        php: ['8.2', '8.3']
         stability: ['prefer-lowest', 'prefer-stable']
-        laravel: ['^10.0', '^11.0']
-        exclude:
-          - php: '8.1'
-            laravel: '^11.0'
+        laravel: ['^12.0']
 
     name: 'PHP ${{ matrix.php }} - Laravel: ${{matrix.laravel}} - ${{ matrix.stability }}'
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ matrix.php }}
-          extensions: dom, curl, libxml, mbstring, zip
+          extensions: dom, curl, libxml, mbstring, zip, json
           coverage: none
 
       - name: Set up Docker
         run: |
-          sudo rm /usr/local/bin/docker-compose
-          curl -L https://github.com/docker/compose/releases/download/1.24.1/docker-compose-`uname -s`-`uname -m` > docker-compose
-          chmod +x docker-compose
-          sudo mv docker-compose /usr/local/bin
-
-      - name: Start Docker container
-        run: docker-compose up -d rabbitmq
+          docker-compose up -d rabbitmq
 
       - name: Install dependencies
-        run: composer update --with='laravel/framework:${{matrix.laravel}}' --${{ matrix.stability }} --prefer-dist --no-interaction --no-progress
+        run: |
+          composer update --with='laravel/framework:${{matrix.laravel}}' --${{ matrix.stability }} --prefer-dist --no-interaction --no-progress
 
       - name: Run Laravel Pint
         run: ./vendor/bin/pint --test
 
+      - name: Wait for RabbitMQ
+        run: |
+          timeout=30
+          until docker exec $(docker ps -qf "name=rabbitmq") rabbitmqctl status >/dev/null 2>&1 || [ $timeout -eq 0 ]; do
+            echo "Waiting for RabbitMQ to be ready... ($timeout seconds left)"
+            sleep 1
+            ((timeout--))
+          done
+          if [ $timeout -eq 0 ]; then
+            echo "Timeout waiting for RabbitMQ"
+            exit 1
+          fi
+
       - name: Execute tests
-        run: sleep 10 && vendor/bin/phpunit
+        run: vendor/bin/phpunit
+        env:
+          HOST: localhost
+          PORT: 5672
+          RABBITMQ_USER: guest
+          RABBITMQ_PASSWORD: guest
+          RABBITMQ_VHOST: /
+
+      - name: Upload test artifacts
+        if: failure()
+        uses: actions/upload-artifact@v3
+        with:
+          name: test-results-php${{ matrix.php }}-laravel${{ matrix.laravel }}
+          path: |
+            ./storage/logs
+            ./phpunit.xml
+            ./.env.testing
