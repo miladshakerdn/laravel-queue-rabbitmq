@@ -20,6 +20,21 @@ jobs:
 
     name: 'PHP ${{ matrix.php }} - Laravel: ${{matrix.laravel}} - ${{ matrix.stability }}'
 
+    services:
+      rabbitmq:
+        image: rabbitmq:3.12-management
+        ports:
+          - 5672:5672
+          - 15672:15672
+        env:
+          RABBITMQ_DEFAULT_USER: guest
+          RABBITMQ_DEFAULT_PASS: guest
+        options: >-
+          --health-cmd "rabbitmqctl node_health_check"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -34,25 +49,20 @@ jobs:
           coverage: none
           tools: composer:v2.8.6
 
-      - name: Get Composer Cache Directory
+      - name: Get composer cache directory
         id: composer-cache
-        run: |
-          echo "dir=$(composer config cache-files-dir)" >> $GITHUB_OUTPUT
+        shell: bash
+        run: echo "dir=$(composer config cache-files-dir)" >> $GITHUB_OUTPUT
 
-      - name: Cache Composer dependencies
+      - name: Cache dependencies
         uses: actions/cache@v4
         with:
           path: ${{ steps.composer-cache.outputs.dir }}
-          key: ${{ runner.os }}-composer-${{ matrix.php }}-${{ matrix.stability }}-${{ hashFiles('**/composer.json') }}
+          key: deps-${{ runner.os }}-php-${{ matrix.php }}-composer-${{ matrix.stability }}-${{ hashFiles('composer.json') }}
           restore-keys: |
-            ${{ runner.os }}-composer-${{ matrix.php }}-${{ matrix.stability }}-
-            ${{ runner.os }}-composer-${{ matrix.php }}-
-            ${{ runner.os }}-composer-
-
-      - name: Set up Docker
-        timeout-minutes: 5
-        run: |
-          docker-compose up -d rabbitmq
+            deps-${{ runner.os }}-php-${{ matrix.php }}-composer-${{ matrix.stability }}-
+            deps-${{ runner.os }}-php-${{ matrix.php }}-composer-
+            deps-${{ runner.os }}-php-${{ matrix.php }}-
 
       - name: Install dependencies
         timeout-minutes: 5
@@ -66,46 +76,32 @@ jobs:
       - name: Wait for RabbitMQ
         timeout-minutes: 2
         run: |
-          echo "Waiting for RabbitMQ to be ready..."
-          for i in {1..30}; do
-            if docker exec $(docker ps -qf "name=rabbitmq") rabbitmqctl status >/dev/null 2>&1; then
-              echo "RabbitMQ is ready!"
-              exit 0
-            fi
-            echo "Attempt $i/30 - Waiting for RabbitMQ..."
+          until curl -s -u guest:guest http://localhost:15672/api/overview > /dev/null 2>&1; do
+            echo "Waiting for RabbitMQ Management API..."
             sleep 1
           done
-          echo "RabbitMQ failed to start"
-          docker ps
-          docker logs $(docker ps -qf "name=rabbitmq")
-          exit 1
+          echo "RabbitMQ is ready!"
 
       - name: Execute tests
         timeout-minutes: 5
-        run: vendor/bin/phpunit --verbose
+        run: vendor/bin/phpunit --verbose --testdox
         env:
           HOST: localhost
           PORT: 5672
           RABBITMQ_USER: guest
           RABBITMQ_PASSWORD: guest
           RABBITMQ_VHOST: /
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COMPOSER_NO_INTERACTION: 1
+          XDEBUG_MODE: off
 
       - name: Store test logs
         if: failure()
         uses: actions/upload-artifact@v4
         timeout-minutes: 1
         with:
-          name: test-logs-${{ matrix.php }}-${{ matrix.stability }}-${{ github.sha }}
+          name: test-logs-php${{ matrix.php }}-${{ matrix.stability }}-${{ github.sha }}
           path: |
             ./storage/logs
             ./phpunit.xml
             ./.env.testing
-            ./docker-compose.logs
           retention-days: 5
-
-      - name: Cleanup
-        if: always()
-        run: |
-          docker-compose down -v
-          docker system prune -f
