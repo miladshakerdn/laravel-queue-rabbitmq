@@ -22,7 +22,7 @@ jobs:
 
     services:
       rabbitmq:
-        image: rabbitmq:3.12-management
+        image: rabbitmq:3.13-management
         ports:
           - 5672:5672
           - 15672:15672
@@ -77,9 +77,12 @@ jobs:
           done
           echo "RabbitMQ is ready!"
 
-      - name: Run all tests
-        timeout-minutes: 10
-        run: composer test
+      - name: Run style check
+        run: vendor/bin/pint --test
+
+      - name: Run tests
+        timeout-minutes: 5
+        run: vendor/bin/phpunit --testdox
         env:
           HOST: localhost
           PORT: 5672
@@ -89,21 +92,6 @@ jobs:
           COMPOSER_NO_INTERACTION: 1
           XDEBUG_MODE: off
 
-      # این step فقط در صورت شکست اجرا می‌شود تا مشکل را دقیق‌تر بررسی کنیم
-      - name: Run individual test suites
-        if: failure()
-        run: |
-          echo "Running style tests..."
-          composer test:style
-          echo "Running unit tests..."
-          composer test:unit
-        env:
-          HOST: localhost
-          PORT: 5672
-          RABBITMQ_USER: guest
-          RABBITMQ_PASSWORD: guest
-          RABBITMQ_VHOST: /
-
       - name: Store test logs
         if: failure()
         uses: actions/upload-artifact@v4
@@ -111,8 +99,7 @@ jobs:
         with:
           name: test-logs-php${{ matrix.php }}-${{ matrix.stability }}-${{ github.sha }}
           path: |
-            ./storage/logs
+            ./tests/logs/**/*
             ./phpunit.xml
             ./.env.testing
-            ./tests/*.log
           retention-days: 5
