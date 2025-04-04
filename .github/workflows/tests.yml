@@ -8,7 +8,7 @@ on:
 
 jobs:
   tests:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     strategy:
       fail-fast: true
@@ -22,6 +22,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
@@ -53,6 +55,7 @@ jobs:
             echo "Timeout waiting for RabbitMQ"
             exit 1
           fi
+          echo "RabbitMQ is ready!"
 
       - name: Execute tests
         run: vendor/bin/phpunit
@@ -63,12 +66,13 @@ jobs:
           RABBITMQ_PASSWORD: guest
           RABBITMQ_VHOST: /
 
-      - name: Upload test artifacts
+      - name: Store test logs
         if: failure()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
-          name: test-results-php${{ matrix.php }}-laravel${{ matrix.laravel }}
+          name: test-logs-php${{ matrix.php }}-laravel${{ matrix.laravel }}-${{ github.sha }}
           path: |
             ./storage/logs
             ./phpunit.xml
             ./.env.testing
+          retention-days: 5
