@@ -30,7 +30,7 @@ jobs:
           RABBITMQ_DEFAULT_USER: guest
           RABBITMQ_DEFAULT_PASS: guest
         options: >-
-          --health-cmd "rabbitmqctl node_health_check"
+          --health-cmd "curl -f http://localhost:15672/api/health/checks/alarms"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
@@ -58,20 +58,15 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ steps.composer-cache.outputs.dir }}
-          key: deps-${{ runner.os }}-php-${{ matrix.php }}-composer-${{ matrix.stability }}-${{ hashFiles('composer.json') }}
+          key: deps-${{ runner.os }}-php${{ matrix.php }}-${{ matrix.stability }}-${{ hashFiles('composer.json') }}
           restore-keys: |
-            deps-${{ runner.os }}-php-${{ matrix.php }}-composer-${{ matrix.stability }}-
-            deps-${{ runner.os }}-php-${{ matrix.php }}-composer-
-            deps-${{ runner.os }}-php-${{ matrix.php }}-
+            deps-${{ runner.os }}-php${{ matrix.php }}-${{ matrix.stability }}-
+            deps-${{ runner.os }}-php${{ matrix.php }}-
 
       - name: Install dependencies
         timeout-minutes: 5
         run: |
           composer update --with='laravel/framework:${{matrix.laravel}}' --${{ matrix.stability }} --prefer-dist --no-interaction --no-progress
-
-      - name: Run Laravel Pint
-        timeout-minutes: 2
-        run: ./vendor/bin/pint --test
 
       - name: Wait for RabbitMQ
         timeout-minutes: 2
@@ -82,9 +77,9 @@ jobs:
           done
           echo "RabbitMQ is ready!"
 
-      - name: Execute tests
-        timeout-minutes: 5
-        run: vendor/bin/phpunit --verbose --testdox
+      - name: Run all tests
+        timeout-minutes: 10
+        run: composer test
         env:
           HOST: localhost
           PORT: 5672
@@ -93,6 +88,21 @@ jobs:
           RABBITMQ_VHOST: /
           COMPOSER_NO_INTERACTION: 1
           XDEBUG_MODE: off
+
+      # این step فقط در صورت شکست اجرا می‌شود تا مشکل را دقیق‌تر بررسی کنیم
+      - name: Run individual test suites
+        if: failure()
+        run: |
+          echo "Running style tests..."
+          composer test:style
+          echo "Running unit tests..."
+          composer test:unit
+        env:
+          HOST: localhost
+          PORT: 5672
+          RABBITMQ_USER: guest
+          RABBITMQ_PASSWORD: guest
+          RABBITMQ_VHOST: /
 
       - name: Store test logs
         if: failure()
@@ -104,4 +114,5 @@ jobs:
             ./storage/logs
             ./phpunit.xml
             ./.env.testing
+            ./tests/*.log
           retention-days: 5
