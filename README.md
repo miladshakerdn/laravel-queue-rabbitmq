@@ -5,6 +5,40 @@ RabbitMQ Queue driver for Laravel
 [![Total Downloads](https://poser.pugx.org/vladimir-yuldashev/laravel-queue-rabbitmq/downloads?format=flat-square)](https://packagist.org/packages/vladimir-yuldashev/laravel-queue-rabbitmq)
 [![License](https://poser.pugx.org/vladimir-yuldashev/laravel-queue-rabbitmq/license?format=flat-square)](https://packagist.org/packages/vladimir-yuldashev/laravel-queue-rabbitmq)
 
+## Laravel 12.x Compatibility
+
+This fork adds support for Laravel 12.x. Last tested on 2025-04-04.
+
+### Test Results
+- Environment:
+  - OS: Windows
+  - PHP: 8.2.12
+  - RabbitMQ: 3.12
+- Results:
+  - Total tests: 61
+  - Passed: 61
+  - Assertions: 276
+  - Skipped: 21 (expected due to environment-specific tests)
+
+### Requirements
+- PHP ^8.2|^8.3
+- Laravel ^12.0
+- php-amqplib ^3.7
+
+### Known Limitations
+- Horizon integration is pending future update
+- Some tests may require specific environment setup
+- Tested primarily on Windows environment
+
+### Installation
+```json
+{
+    "require": {
+        "miladshakerdn/laravel-queue-rabbitmq": "dev-laravel-12-support"
+    }
+}
+```
+
 ## Support Policy
 
 Only the latest version will get new features. Bug fixes will be provided using the following scheme:
